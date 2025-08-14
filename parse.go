@@ -1,12 +1,14 @@
 package env
 
+import "github.com/blugnu/env/internal"
+
 // ConversionFunc is a function that converts a string to a value of type T.
 // It is the type of the conversion function used by the Parse and Override
 // functions.
 //
 // # parameters
 //
-//	string string   // the string to convert
+//	string  // the string to convert
 //
 // # returns
 //
@@ -64,6 +66,16 @@ func Override[T comparable](dest *T, name string, cnv func(string) (T, error)) (
 // type T, obtained by passing the value of the environment variable to a provided
 // conversion function.
 //
+// # Default Value
+//
+// A default value may be provided (optional) which will be returned if the specified
+// environment variable is not set.
+//
+// If the environment variable is set but cannot be parsed or converted, an error
+// will be returned and any default value (if provided) is ignored.
+//
+// The default value is not used if the variable is set to an empty string.
+//
 // # parameters
 //
 //	name string             // the name of the environment variable to parse
@@ -71,6 +83,11 @@ func Override[T comparable](dest *T, name string, cnv func(string) (T, error)) (
 //	cnv ConversionFunc[T]   // a function to parse the environment variable;
 //	                        // the function should return a value of type T and
 //	                        // an error if the value cannot be converted
+//
+//	def ...T                // optional default value to use if the environment
+//	                        // variable is not set; the argument is variadic to
+//	                        // allow for no default value.  If multiple default
+//	                        // values are provided, only the first will be used.
 //
 // # returns
 //
@@ -86,13 +103,22 @@ func Override[T comparable](dest *T, name string, cnv func(string) (T, error)) (
 // this function.  For example, to parse an integer environment variable:
 //
 //	value, err := env.Parse("MY_INT_VAR", as.Int)
-func Parse[T any](name string, cnv ConversionFunc[T]) (T, error) {
-	if v, ok := osLookupEnv(name); ok {
+func Parse[T any](name string, cnv ConversionFunc[T], def ...T) (T, error) {
+	handleError := func(err error) (T, error) {
+		return *new(T), ParseError{VariableName: name, Err: err}
+	}
+
+	if v, ok := internal.LookupEnv(name); ok {
 		r, err := cnv(v)
 		if err != nil {
-			return *new(T), ParseError{VariableName: name, Err: InvalidValueError{Value: v, Err: err}}
+			return handleError(InvalidValueError{Value: v, Err: err})
 		}
 		return r, nil
 	}
-	return *new(T), ParseError{VariableName: name, Err: ErrNotSet}
+
+	if len(def) > 0 {
+		return def[0], nil
+	}
+
+	return handleError(ErrNotSet)
 }
