@@ -1,7 +1,8 @@
-package as
+package as_test
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	. "github.com/blugnu/test"
@@ -36,7 +37,7 @@ func TestFilename(t *testing.T) {
 		Case("valid filename that does not exist", testcase{
 			input: "./file/does/not/exist",
 			assert: func(result string, err error) {
-				Expect(err).Is(as.ErrFileDoesNotExist)
+				Expect(err).Is(os.ErrNotExist)
 				Expect(result).To(Equal(""))
 			},
 		}),
@@ -45,7 +46,7 @@ func TestFilename(t *testing.T) {
 			input: string([]byte{0x00, 0x01, 0x02}), // invalid filename
 			assert: func(result string, err error) {
 				Expect(err).IsNotNil()
-				Expect(errors.Is(err, as.ErrFileDoesNotExist)).To(BeFalse()) // may be a different error on different OSes
+				Expect(errors.Is(err, os.ErrNotExist)).To(BeFalse()) // may be a different error on different OSes
 				Expect(result).To(Equal(""))
 			},
 		}),
@@ -53,7 +54,7 @@ func TestFilename(t *testing.T) {
 		Case("empty filename", testcase{
 			input: "",
 			assert: func(result string, err error) {
-				Expect(err).Is(as.ErrFileDoesNotExist)
+				Expect(err).Is(as.ErrFilenameIsEmpty)
 				Expect(result).To(Equal(""))
 			},
 		}),

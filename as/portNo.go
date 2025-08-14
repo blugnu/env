@@ -1,7 +1,10 @@
 package as
 
 import (
+	"fmt"
+	"math"
 	"strconv"
+	"strings"
 
 	"github.com/blugnu/env"
 )
@@ -27,12 +30,18 @@ import (
 //   - if the integer is outside the valid range, the function returns an
 //     env.RangeError
 func PortNo(s string) (int, error) {
+	handleError := func(err error) (int, error) {
+		return 0, fmt.Errorf("as.PortNo: %w", err)
+	}
+
+	s = strings.TrimSpace(s)
 	i, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, err
+	switch {
+	case err != nil:
+		return handleError(err)
+	case i < 0 || i > math.MaxUint16:
+		return handleError(env.RangeError[int]{Min: 0, Max: math.MaxUint16})
 	}
-	if i < 0 || i > 65535 {
-		return 0, env.RangeError[int]{Min: 0, Max: 65535}
-	}
+
 	return i, nil
 }

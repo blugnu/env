@@ -4,123 +4,168 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
+	"io"
+	"path/filepath"
 	"strings"
+
+	"github.com/blugnu/env/internal"
 )
 
-// Load loads environment variables from one or more files.  Files should be formatted as a list
-// of key-value pairs, one per line, separated by an equals sign. Lines that are empty or start
-// with a hash (#) are ignored.
+// Load loads environment variables from 0 or more files. Files are loaded in the order
+// specified and will be loaded only once even if specified multiple times. Files that do not
+// exist are ignored without error.
 //
-// # example file format
+// The function will not replace or overwrite a variable already present in the environment
+// (even if its value is empty).
 //
-//	# this is a comment
-//	NAME1=value1
-//	NAME2=value2
+// All errors encountered while loading files are returned as a single error value using
+// [errors.Join].  If any error occurs while loading files, the environment is restored to
+// its original state.
 //
-//	# this is another comment
-//	NAME3=value3
+// The contents of any loaded file must be formatted as a list of key-value pairs, one
+// per line, separated by an equals sign. Lines that are empty or start with a hash (#)
+// are ignored.
 //
-// # parameters
+// # .env File
 //
-//	files: ...string    // 0..n file path(s)
-//
-// # returns
-//
-//	error      // an error that wraps all errors that occurred while loading variables;
-//	           // if no errors occurred the result is nil
-//
-// The joined errors will be in the order that the files were specified and will be wrapped
-// with the file path that caused the error:
-//
-//	"path/to/file: error"
-//
-// # .env file
-//
-// The function will always attempt to load variables from a ".env" file.
-//
-// If ".env" (or "./.env") is included in the files parameter it will be loaded
-// in the order specified relative to other files; if the ".env" file does not exist
-// an error will be included in the returned error.
-//
-// If ".env" is not explicitly specified it will be loaded before any other files, if it
-// exists; if it does not exist it is ignored without error.
-//
-// If no files are specified the function will attempt to load variables from ".env"
-// and will return an error if the file does not exist.
-//
-// # example: loading .env:
-//
-//	if err := Load(); err != nil {
-//		log.Fatal(err) // possibly because .env does not exist
-//	}
-//
-// # example: loading .env and a specified file:
-//
-//	if err := Load("test.env"); err != nil {
-//		log.Fatal(err) // will not be because .env did not exist; could be because test.env does not exist
-//	}
-func Load(files ...string) error {
-	// determine if ".env" has been explicitly specified and if it is required
-	filenames := map[string]bool{}
-	for _, f := range files {
-		filenames[f] = true
-	}
-	dotenvRequired := len(filenames) == 0 || (filenames[".env"] || filenames["./.env"])
+// The .env file is a special file that is always loaded first (if it exists) whether it is
+// included in the list of filenames or not.
+func Load(filenames ...string) error {
+	initialState := State()
 
-	// if ".env" has not been explicitly specified we will load it before loading
-	// any other files
-	if !filenames["./.env"] && !filenames[".env"] {
-		files = append([]string{".env"}, files...)
-	}
+	cleaned := make([]string, 0, len(filenames))
+	seen := make(map[string]struct{}, len(filenames))
 
-	// we will be collecting any errors that occur while loading the files
-	errs := []error{}
-
-	for _, filename := range files {
-		err := loadFile(filename)
-		if err == nil {
+	// clean up filenames: remove empty strings, duplicates or files that
+	// don't exist, ensuring that .env is loaded first
+	for _, filename := range append([]string{internal.EnvFile}, filenames...) {
+		if filename = strings.TrimSpace(filename); filename == "" {
 			continue
 		}
-		if !dotenvRequired && (filename == ".env" || filename == "./.env") && errors.Is(err, fs.ErrNotExist) {
+
+		filename = filepath.Clean(filename)
+		if _, ok := seen[filename]; ok {
 			continue
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", filename, err))
+		seen[filename] = struct{}{}
+
+		if !internal.FileExists(filename) {
+			continue
+		}
+
+		cleaned = append(cleaned, filename)
 	}
 
-	return errors.Join(errs...)
+	if len(cleaned) == 0 {
+		return nil
+	}
+
+	errs := make([]error, len(cleaned))
+	for i, file := range cleaned {
+		errs[i] = LoadFile(file)
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		initialState.Restore()
+		return fmt.Errorf("env.Load: %w", err)
+	}
+
+	return nil
 }
 
-// loadFile loads environment variables from a file. The file should be formatted as a list of
-// key-value pairs, one per line, separated by an equals sign. Lines that are empty or start with
-// a hash (#) are ignored.
+// LoadFile loads environment variables from a file. Actual loading is performed by
+// the [LoadFromReader] function.
 //
 // # parameters
 //
-//	path: string   // the path to the file to loadFile
+//	filename: string   // the filename to load
 //
 // # returns
 //
-//	error          // any error that occurrs while loading or applying variables
-func loadFile(path string) error {
-	file, err := newFileReader(path)
-	if err != nil {
-		return err
+//	error
+func LoadFile(filename string) error {
+	handleError := func(err error) error {
+		return NewFileError(filename, err)
 	}
-	defer file.Close()
+
+	reader, err := internal.NewFileReader(filename)
+	if err != nil {
+		return handleError(err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	if err := LoadFromReader(reader); err != nil {
+		return handleError(err)
+	}
+
+	return nil
+}
+
+// LoadFromReader loads environment variables from an [io.Reader]. The reader
+// should provide a list of key-value pairs, one per line, separated by an
+// equals sign. Lines that are empty, all whitespace or start with a '#'
+// character are ignored.
+//
+// If any error occurs during loading, the environment is restored to the
+// state it was in before the function was called.  i.e. all values from
+// the reader are successfully loaded or none at all.
+func LoadFromReader(reader io.Reader) error {
+	initialState := State()
+
+	handleError := func(err error) error {
+		initialState.Restore()
+		return fmt.Errorf("env.LoadFromReader: %w", err)
+	}
 
 	errs := []error{}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
+	scanner.Split(internal.ScanLines)
+
+	// allow longer lines than the default (~64KiB)
+	//
+	// this is primarily to cater for the use of environment
+	// variable files using base64 encoded certificates and keys,
+	//
+	// NOTE: use of environment variables for such things is generally
+	// discouraged in favor of more robust secrets management solutions,
+	// but may be used in non-production or constrained environments
+	const initialCap = 64 * 1024   // 64Kb
+	const maxCap = 4 * 1024 * 1024 // 4Mb
+	scanner.Buffer(make([]byte, 0, initialCap), maxCap)
+
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
+		line := scanner.Text()
+		if trimmed := strings.TrimSpace(line); trimmed == "" || trimmed[0] == '#' {
 			continue
 		}
-		parts := strings.SplitN(line, "=", 2)
-		vname := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		errs = append(errs, os.Setenv(vname, value))
+
+		vname, value, ok := strings.Cut(line, "=")
+		if !ok {
+			errs = append(errs, fmt.Errorf("%w: %q", ErrInvalidEntry, line))
+			continue
+		}
+
+		// variable names are trimmed (values are not)
+		if vname = strings.TrimSpace(vname); vname == "" {
+			errs = append(errs, fmt.Errorf("%w: no variable name: %q", ErrInvalidEntry, line))
+			continue
+		}
+
+		// do not replace existing variables (even if empty)
+		if _, isSet := internal.LookupEnv(vname); isSet {
+			continue
+		}
+
+		if err := internal.Setenv(vname, value); err != nil {
+			errs = append(errs, fmt.Errorf("%w: %w", ErrSetFailed, err))
+		}
 	}
-	return errors.Join(errs...)
+
+	errs = append(errs, scanner.Err())
+
+	if err := errors.Join(errs...); err != nil {
+		return handleError(err)
+	}
+
+	return nil
 }

@@ -29,9 +29,11 @@
 
 ## Features
 
-- [ ] **.env File Support**: Load variables from a `.env` file and/or any other file(s)
-- [ ] **Type Conversions**: Easily convert environment variables to Go types
-- [ ] **Validation**: Check common configuration errors (e.g. `as.PortNo` to enforce 0 <= X <= 65535)
+- [ ] **.env File Support**: Load variables from a `.env` file and/or specified file(s)
+- [ ] **Type Conversions**: Safely convert environment variable strings to Go types
+- [ ] **Validation**: Use validated conversions to check common configuration
+                      errors (e.g. `as.PortNo` to enforce 0 <= X <= 65535)
+- [ ] **Extensible**: Implement your own type conversions
 - [ ] **Testing**: Convenient testing utilities
 
 ## Installation
@@ -40,25 +42,38 @@
 go get github.com/blugnu/env
 ```
 
-## Example Usage
+## Examples
 
-### Override Default Configuration
+### Parsing Environment Values
 
-Demonstrates the use of the `env.Override` function to replace a default
-configuration value with a value parsed from an environment variable:
+#### 1. Parse an Environment Value with a Default Value
+
+Demonstrates the use of the `env.Parse` function to parse an optional
+value from an environment variable, with a default value:
 
 ```go
     port := 8080
-    if _, err := env.Override(&port, "SERVICE_PORT", as.PortNo); err != nil {
+    port, err := env.Parse("SERVICE_PORT", as.PortNo, port); err != nil {
         log.Fatal(err)
     }
     log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 ```
 
-### Parse a Required Configuration Value
+If the environment variable is set the variable is updated with the parsed value.
+
+If the environment variable is not set, the default value is returned.  In this case
+the default value is the variable's original value so the variable is unchanged.
+
+If the environment variable fails to parse, an error is returned.
+
+> :warning: if the variable is set to an empty string,  whether an error is returned or
+> the default value is used depends on whether an empty string can be successfully parsed.
+> This is unlikely but depends on the specific `as` conversion used.
+
+#### 2. Parse a Required Environment Variable
 
 Demonstrates the use of the `env.Parse` function to parse a required
-configuration value from an environment variable:
+value (i.e. no default) from an environment variable:
 
 ```go
     authURL, err := env.Parse("AUTH_SERVICE_URL", as.AbsoluteURL)
@@ -67,32 +82,62 @@ configuration value from an environment variable:
     }
 ```
 
-### Load Configuration from a File
+With no default value, an error is returned if the environment variable is not set
+or fails to parse.
 
-Demonstrates the use of the `env.Load` function to load configuration:
+#### 3. Parse an Environment Variable into a Variable
 
-> by default, with no filename(s) specified, the `Load()` function
-> loads configuration from a `.env` file.
+Demonstrates the use of the `env.ParseInto` function to parse an
+environment variable into an existing variable:
 
 ```go
-    if err := env.Load(); err != nil {
+    var debug bool
+    if err := env.ParseInto(&debug, "DEBUG", as.Bool); err != nil {
         log.Fatal(err)
     }
 ```
 
+This can simplify error handling code and reduce boilerplate when parsing
+multiple variables, e.g.:
+
+```go
+    var errs  []error
+
+    errs = append(errs, env.ParseInto(&cfg.Debug, "DEBUG", as.Bool))
+    errs = append(errs, env.ParseInto(&cfg.Port, "SERVICE_PORT", as.PortNo, 8080))
+    errs = append(errs, env.ParseInto(&cfg.Url, "AUTH_SERVICE_URL", as.AbsoluteURL))
+
+    return errors.Join(errs...)
+```
+
+### Get a Map of Environment Variables
+
+Demonstrates the use of the `Vars` function to get a map of environment
+variables:
+
+```go
+    // get a map containing specific environment variables (if set)
+    vars := env.Vars("SERVICE_PORT", "SERVICE_HOSTNAME")
+```
+
 ### Preserve Environment Variables in a Test
 
-Demonstrates the use of `defer env.State().Reset()` to preserve environment
-variables during a test:
+Although `testing.T` provides methods for setting environment variables for the
+duration of the current test, this leaves other variables in the environment
+unchanged.
+
+To provide a test with a clean, known environment, use the `env.State` function
+to obtain the current state of the environment, and `Restore` it at the end of
+the test. This allows the environment to be cleared and set for the test using
+regular `os` functions as required, without affecting other tests:
 
 ```go
     func TestSomething(t *testing.T) {
         // ARRANGE
-        defer env.State().Reset()
-        env.Vars{
-            "SOME_VAR": "some value",
-            "ANOTHER_VAR": "another value",
-        }.Set()
+        defer env.State().Restore()
+
+        os.Clearenv()
+        os.Setenv("SOME_VAR", "some value")
 
         // ACT
         SomeFuncUsingEnvVars()

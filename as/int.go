@@ -1,6 +1,7 @@
 package as
 
 import (
+	"fmt"
 	"strconv"
 )
 
@@ -8,17 +9,17 @@ import (
 //
 // # parameters
 //
-// 	s string   // the string to convert
+//	s string   // the string to convert
 //
 // # returns
 //
-// 	int        // the converted value
+//	int        // the converted value
 //
-// 	error      // any error that occurs during conversion
+//	error      // any error that occurs during conversion
 func Int(s string) (int, error) {
 	i, err := strconv.Atoi(s)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("as.Int: %w: %w", ErrNotAnInteger, err)
 	}
 	return i, nil
 }

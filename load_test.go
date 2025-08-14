@@ -1,274 +1,328 @@
-package env
+package env_test
 
 import (
 	"bytes"
-	"errors"
+	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"testing"
 
-	"github.com/blugnu/test"
+	. "github.com/blugnu/test"
+
+	"github.com/blugnu/env"
+	"github.com/blugnu/env/internal"
 )
 
-func fakeFile(content string) fileReader {
-	return io.NopCloser(bytes.NewReader([]byte(content)))
-}
-
 func TestLoad(t *testing.T) {
-	// ARRANGE
-	testcases := []struct {
-		scenario string
-		args     []any
-		exec     func(t *testing.T)
-	}{
-		{scenario: "no arguments/.env exists",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				readsDotEnv := false
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					readsDotEnv = readsDotEnv || path == ".env"
-					return fakeFile("VAR1=loaded-value-1\nVAR2=loaded-value-2"), nil
-				})()
-				os.Clearenv()
-				os.Setenv("VAR1", "env-value")
+	With(t)
 
-				// ACT
-				err := Load()
+	const cTestFilename = "test-filename"
 
-				// ASSERT
-				test.That(t, err).IsNil()
-				test.IsTrue(t, readsDotEnv)
-				test.That(t, os.Getenv("VAR1")).Equals("loaded-value-1")
-				test.That(t, os.Getenv("VAR2")).Equals("loaded-value-2")
-			},
-		},
-		{scenario: "no arguments/.env does not exist",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(string) (fileReader, error) {
-					return nil, os.ErrNotExist
-				})()
-				os.Clearenv()
-				os.Setenv("VAR1", "env-value")
-
-				// ACT
-				err := Load()
-
-				// ASSERT
-				test.Error(t, err).Is(os.ErrNotExist)
-				test.That(t, os.Getenv("VAR1")).Equals("env-value")
-			},
-		},
-		{scenario: ".env argument/.env does not exist",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(string) (fileReader, error) {
-					return nil, os.ErrNotExist
-				})()
-				os.Clearenv()
-				os.Setenv("VAR1", "env-value")
-
-				// ACT
-				err := Load(".env")
-
-				// ASSERT
-				test.Error(t, err).Is(os.ErrNotExist)
-				test.That(t, os.Getenv("VAR1")).Equals("env-value")
-			},
-		},
-		{scenario: "file path argument/valid file/.env does not exist",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				filesLoaded := []string{}
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					filesLoaded = append(filesLoaded, path)
-					switch path {
-					case ".env":
-						return nil, fs.ErrNotExist
-					case "test.env":
-						return fakeFile("VAR1=loaded-value-1\nVAR2=loaded-value-2"), nil
-					default:
-						panic("unexpected file path: " + path)
-					}
-				})()
-				os.Clearenv()
-				os.Setenv("VAR1", "env-value")
-
-				// ACT
-				err := Load("test.env")
-
-				// ASSERT
-				test.That(t, err).IsNil()
-				test.Slice(t, filesLoaded).Equals([]string{".env", "test.env"})
-				test.That(t, os.Getenv("VAR1")).Equals("loaded-value-1")
-				test.That(t, os.Getenv("VAR2")).Equals("loaded-value-2")
-			},
-		},
-		{scenario: "file path argument/valid file/.env exists",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				filesLoaded := []string{}
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					filesLoaded = append(filesLoaded, path)
-					switch path {
-					case ".env":
-						return fakeFile("VAR3=dotenv-value-3"), nil
-					case "test.env":
-						return fakeFile("VAR1=loaded-value-1\nVAR2=loaded-value-2"), nil
-					default:
-						panic("unexpected file path: " + path)
-					}
-				})()
-				os.Clearenv()
-				os.Setenv("VAR1", "env-value")
-
-				// ACT
-				err := Load("test.env")
-
-				// ASSERT
-				test.That(t, err).IsNil()
-				test.That(t, filesLoaded).Equals([]string{".env", "test.env"})
-				test.That(t, os.Getenv("VAR1")).Equals("loaded-value-1")
-				test.That(t, os.Getenv("VAR2")).Equals("loaded-value-2")
-				test.That(t, os.Getenv("VAR3")).Equals("dotenv-value-3")
-			},
-		},
-		{scenario: "file path argument/valid file/.env error",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				dotenverr := errors.New("error reading .env")
-				filesLoaded := []string{}
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					filesLoaded = append(filesLoaded, path)
-					switch path {
-					case ".env":
-						return nil, dotenverr
-					case "test.env":
-						return fakeFile("VAR1=loaded-value-1\nVAR2=loaded-value-2"), nil
-					default:
-						panic("unexpected file path: " + path)
-					}
-				})()
-				os.Clearenv()
-				os.Setenv("VAR1", "env-value")
-
-				// ACT
-				err := Load("test.env")
-
-				// ASSERT
-				test.Error(t, err).Is(dotenverr)
-				test.That(t, filesLoaded).Equals([]string{".env", "test.env"})
-				test.That(t, os.Getenv("VAR1")).Equals("loaded-value-1")
-				test.That(t, os.Getenv("VAR2")).Equals("loaded-value-2")
-			},
-		},
-		{scenario: "explicit .env/before other files",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				filesLoaded := []string{}
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					filesLoaded = append(filesLoaded, path)
-					switch path {
-					case ".env":
-						return fakeFile("VAR=dotenv-value"), nil
-					case "test.env":
-						return fakeFile("VAR=test-value"), nil
-					default:
-						panic("unexpected file path: " + path)
-					}
-				})()
-				os.Clearenv()
-				os.Setenv("VAR", "env-value")
-
-				// ACT
-				err := Load(".env", "test.env")
-
-				// ASSERT
-				test.That(t, err).IsNil()
-				test.That(t, filesLoaded).Equals([]string{".env", "test.env"})
-				test.That(t, os.Getenv("VAR")).Equals("test-value")
-			},
-		},
-		{scenario: "explicit .env/after other files",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				filesLoaded := []string{}
-				defer State().Reset()
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					filesLoaded = append(filesLoaded, path)
-					switch path {
-					case ".env":
-						return fakeFile("VAR=dotenv-value"), nil
-					case "test.env":
-						return fakeFile("VAR=test-value"), nil
-					default:
-						panic("unexpected file path: " + path)
-					}
-				})()
-				os.Clearenv()
-				os.Setenv("VAR", "env-value")
-
-				// ACT
-				err := Load("test.env", ".env")
-
-				// ASSERT
-				test.That(t, err).IsNil()
-				test.That(t, filesLoaded).Equals([]string{"test.env", ".env"})
-				test.That(t, os.Getenv("VAR")).Equals("dotenv-value")
-			},
-		},
-		{scenario: "multiple errors",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				dotenverr := errors.New("error reading .env")
-				testenverr := errors.New("error reading test.env")
-				defer test.Using(&newFileReader, func(path string) (fileReader, error) {
-					switch path {
-					case ".env":
-						return nil, dotenverr
-					case "test.env":
-						return nil, testenverr
-					default:
-						panic("unexpected file path: " + path)
-					}
-				})()
-
-				// ACT
-				err := Load("test.env")
-
-				// ASSERT
-				test.Error(t, err).Is(dotenverr)
-				test.Error(t, err).Is(testenverr)
-			},
-		},
+	type testcase struct {
+		fileContent map[string]any // filename: string (content) or error
+		filenames   []string
+		assert      func(error)
 	}
-	for _, tc := range testcases {
-		t.Run(tc.scenario, func(t *testing.T) {
-			tc.exec(t)
-		})
-	}
+	Run(Testcases(
+		ForEach(func(tc testcase) {
+			// arrange
+			defer Restore(Original(&internal.FileExists).ReplacedBy(func(filename string) bool {
+				_, ok := tc.fileContent[filename]
+				return ok
+			}))
+
+			defer Restore(Original(&internal.NewFileReader).ReplacedBy(func(filename string) (io.ReadCloser, error) {
+				switch v := tc.fileContent[filename].(type) {
+				case error:
+					return nil, v
+				case string:
+					return io.NopCloser(bytes.NewReader([]byte(v))), nil
+				default:
+					return nil, fmt.Errorf("unsupported file content type: %T", v)
+				}
+			}))
+
+			// provide each test case with a clean environment including one
+			// set variable (PRESET)
+			defer env.State().Restore()
+			os.Clearenv()
+			t.Setenv("PRESET", "true")
+
+			// act
+			err := env.Load(tc.filenames...)
+
+			// assert
+			tc.assert(err)
+		}),
+
+		Case("no files specified/.env does not exist", testcase{
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Environ()).Should(HaveLen(1))
+				Expect(os.Getenv("PRESET")).To(Equal("true"))
+			},
+		}),
+
+		Case("no files specified/.env exists with valid entries", testcase{
+			fileContent: map[string]any{
+				internal.EnvFile: "VAR1=value1\nVAR2=value2",
+			},
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Environ()).To(ContainItems([]string{
+					"VAR1=value1",
+					"VAR2=value2",
+				}))
+			},
+		}),
+
+		Case("no files specified/.env exists with invalid entries", testcase{
+			fileContent: map[string]any{
+				internal.EnvFile: "VAR1=value1\nVAR2 invalid",
+			},
+			assert: func(err error) {
+				Expect(err).Is(env.FileError{Filename: internal.EnvFile})
+				Expect(err).Is(env.ErrInvalidEntry)
+				Expect(os.Environ()).Should(HaveLen(1))
+				Expect(os.Getenv("PRESET")).To(Equal("true"))
+			},
+		}),
+
+		Case("whitespace filename specified/.env exists with valid entries", testcase{
+			fileContent: map[string]any{internal.EnvFile: "VAR1=value1"},
+			filenames:   []string{"  "},
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Getenv("VAR1")).To(Equal("value1"))
+			},
+		}),
+
+		Case("attempt to override .env value with other file by specifying .env last", testcase{
+			fileContent: map[string]any{
+				internal.EnvFile: "VAR1=value from .env",
+				cTestFilename:    "VAR1=value from test-filename",
+			},
+			filenames: []string{cTestFilename, ".env"},
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Getenv("VAR1")).To(Equal("value from .env"))
+			},
+		}),
+
+		Case("does not override existing environment variables", testcase{
+			fileContent: map[string]any{
+				internal.EnvFile: "PRESET=false\nVAR1=value1",
+			},
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Getenv("PRESET")).To(Equal("true"))
+				Expect(os.Getenv("VAR1")).To(Equal("value1"))
+			},
+		}),
+
+		Case("loads all files or none", testcase{
+			fileContent: map[string]any{
+				"file1": "VAR1=value1",
+				"file2": "=value2", // invalid entry: no variable name
+			},
+			filenames: []string{"file1", "file2"},
+			assert: func(err error) {
+				Expect(err).Is(env.FileError{Filename: "file2"})
+				Expect(err).Is(env.ErrInvalidEntry)
+				Expect(os.Environ()).Should(HaveLen(1))
+				Expect(os.Getenv("PRESET")).To(Equal("true"))
+			},
+		}),
+	))
+
+	Run(Test("duplicate and equivalent filenames are loaded only once", func() {
+		// arrange
+		loaded := []string{}
+
+		defer Restore(Original(&internal.FileExists).ReplacedBy(func(filename string) bool {
+			return true
+		}))
+		defer Restore(Original(&internal.NewFileReader).ReplacedBy(func(filename string) (io.ReadCloser, error) {
+			loaded = append(loaded, filename)
+			return io.NopCloser(bytes.NewReader([]byte{})), nil
+		}))
+		defer env.State().Restore()
+		os.Clearenv()
+
+		// act
+		err := env.Load(".env", ".env", "./.env", "./././.env", "other-file", "other-file")
+
+		// assert
+		Expect(err).IsNil()
+		Expect(loaded).To(EqualSlice([]string{".env", "other-file"}), "files loaded")
+	}))
 }
 
-func TestLoadFile_WithEmptyLinesAndComments(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
-	defer test.Using(&newFileReader, func(string) (fileReader, error) {
-		return fakeFile("VAR1=value-1\n\n# comment\nVAR2=value-2=with-equals"), nil
-	})()
+func TestLoadFile(t *testing.T) {
+	With(t)
 
-	// ACT
-	err := loadFile("test.env")
+	const cTestFilename = "test-filename"
 
-	// ASSERT
-	test.That(t, err).IsNil()
-	test.That(t, os.Getenv("VAR1")).Equals("value-1")
-	test.That(t, os.Getenv("VAR2")).Equals("value-2=with-equals")
+	type testcase struct {
+		reader    io.ReadCloser
+		readerErr error
+		assert    func(error)
+	}
+	Run(Testcases(
+		ForEach(func(tc testcase) {
+			// arrange
+			defer Restore(Original(&internal.NewFileReader).ReplacedBy(func(string) (io.ReadCloser, error) {
+				return tc.reader, tc.readerErr
+			}))
+
+			defer env.State().Restore()
+			os.Clearenv()
+
+			// act
+			err := env.LoadFile(cTestFilename)
+
+			// assert
+			tc.assert(err)
+		}),
+
+		Case("file exists and is valid", testcase{
+			reader: io.NopCloser(bytes.NewReader([]byte("VAR=is set"))),
+			assert: func(err error) {
+				Expect(err).Is(nil)
+				Expect(os.Getenv("VAR")).To(Equal("is set"))
+			},
+		}),
+
+		Case("file does not exist", testcase{
+			reader:    nil,
+			readerErr: os.ErrNotExist,
+			assert: func(err error) {
+				Expect(err).Is(env.FileError{Filename: cTestFilename})
+				Expect(err).Is(os.ErrNotExist)
+			},
+		}),
+
+		Case("file contains invalid entry", testcase{
+			reader: io.NopCloser(bytes.NewReader([]byte("VAR1=valid\nVAR2 invalid"))),
+			assert: func(err error) {
+				Expect(err).Is(env.FileError{Filename: cTestFilename})
+				Expect(err).Is(env.ErrInvalidEntry)
+
+				Run(Test("valid entries are not applied", func() {
+					_, ok := os.LookupEnv("VAR1")
+					Expect(ok).To(BeFalse())
+				}))
+			},
+		}),
+	))
+}
+
+func TestLoadFromReader(t *testing.T) {
+	With(t)
+
+	type testcase struct {
+		content string
+		scanErr error
+		setErr  error
+		assert  func(error)
+	}
+	Run(Testcases(
+		ForEach(func(tc testcase) {
+			// arrange
+			if tc.scanErr != nil {
+				defer Restore(Original(&internal.ScanLines).ReplacedBy(func([]byte, bool) (int, []byte, error) {
+					return 0, nil, tc.scanErr
+				}))
+			}
+			if tc.setErr != nil {
+				defer Restore(Original(&internal.Setenv).ReplacedBy(func(string, string) error {
+					return tc.setErr
+				}))
+			}
+
+			defer env.State().Restore()
+			os.Clearenv()
+
+			src := io.NopCloser(bytes.NewReader([]byte(tc.content)))
+
+			// act
+			err := env.LoadFromReader(src)
+
+			// assert
+			tc.assert(err)
+		}),
+
+		Case("contains empty lines", testcase{
+			content: "\nVAR1=value1\n\nVAR2=value2\n",
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Environ()).To(ContainItems([]string{
+					"VAR1=value1",
+					"VAR2=value2",
+				}))
+			},
+		}),
+
+		Case("variable name and value contains whitespace", testcase{
+			content: "VAR1 = value1\nVAR2=value2 \n",
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Environ()).To(ContainItems([]string{
+					"VAR1= value1",
+					"VAR2=value2 ",
+				}))
+			},
+		}),
+
+		Case("value contains equals sign", testcase{
+			content: "VAR1=value=with=equals\n",
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Getenv("VAR1")).To(Equal("value=with=equals"))
+			},
+		}),
+
+		Case("value contains hash", testcase{
+			content: "VAR1=value#with#hash\n",
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Getenv("VAR1")).To(Equal("value#with#hash"))
+			},
+		}),
+
+		Case("missing variable name", testcase{
+			content: "VAR1=value1\n=value2",
+			assert: func(err error) {
+				Expect(err).Is(env.ErrInvalidEntry)
+				Expect(os.Environ()).Should(BeEmpty())
+			},
+		}),
+
+		Case("setting variable fails", testcase{
+			content: "VAR1=value1\nVAR2=value2\n",
+			setErr:  os.ErrInvalid,
+			assert: func(err error) {
+				Expect(err).Is(os.ErrInvalid)
+				Expect(os.Environ()).Should(BeEmpty())
+			},
+		}),
+
+		Case("ignores commented lines", testcase{
+			content: "# VAR1=value1\nVAR2=value2\n",
+			assert: func(err error) {
+				Expect(err).IsNil()
+				Expect(os.Environ()).Should(HaveLen(1))
+				Expect(os.Getenv("VAR2")).To(Equal("value2"))
+			},
+		}),
+
+		Case("returns any scanner error", testcase{
+			content: "VAR1=value1\nVAR2=value2\n",
+			scanErr: os.ErrInvalid,
+			assert: func(err error) {
+				Expect(err).Is(os.ErrInvalid)
+				Expect(os.Environ()).Should(BeEmpty())
+			},
+		}),
+	))
 }

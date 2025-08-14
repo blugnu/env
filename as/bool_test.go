@@ -1,9 +1,11 @@
-package as
+package as_test
 
 import (
 	"strconv"
 	"strings"
 	"testing"
+
+	. "github.com/blugnu/test"
 
 	"github.com/blugnu/env/as"
 )
@@ -55,8 +57,8 @@ func TestBool(t *testing.T) {
 			},
 		}),
 
-		Case("invalid values", testcase{
-			values: "not a valid boolean, 01, 00, 1.0, 0.0",
+		Case("invalid, empty and whitespace values", testcase{
+			values: "not a valid boolean, 01, 00, 1.0, 0.0, ,     ",
 			assert: func(result bool, err error) {
 				Expect(err).Is(strconv.ErrSyntax)
 				Expect(result).To(Equal(false))

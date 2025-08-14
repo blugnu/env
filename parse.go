@@ -1,66 +1,13 @@
 package env
 
-import "github.com/blugnu/env/internal"
+import (
+	"github.com/blugnu/env/internal"
+)
 
-// ConversionFunc is a function that converts a string to a value of type T.
-// It is the type of the conversion function used by the Parse and Override
-// functions.
-//
-// # parameters
-//
-//	string  // the string to convert
-//
-// # returns
-//
-//	T       // the converted value
-//
-//	error   // any error that occurs during conversion
+// ConversionFunc is the type of a function that converts a string to a
+// value of type T.  The function should return an error if the conversion
+// cannot be performed.
 type ConversionFunc[T any] func(string) (T, error)
-
-// Override replaces the current value of some variable with the value obtained
-// by parsing a named environment variable. If the named environment variable is
-// not set, the target variable is not modified.
-//
-// If an error occurs during parsing or conversion, the target variable is not
-// modified and the error is returned.
-//
-// The function returns true if the target variable was modified from its
-// original value, false otherwise.
-//
-// # parameters
-//
-//	dest *T                       // a pointer to the variable to be changed
-//
-//	name string                   // the name of the environment variable to parse
-//
-//	cnv func(string) (T, error)   // a function to parse the environment variable
-//
-// # returns
-//
-//	bool    // true if the target variable was modified, false otherwise
-//
-//	error   // any error resulting from parsing the named environment variable
-//
-// The bool result should not be relied on to determine whether an error occurred;
-// The function will return false when:
-//
-//   - an error occurs parsing or converting the named environment variable
-//   - the named environment variable is not set
-//   - the named environment variable is set with a value that is successfully
-//     parsed and converted to yield the same value as currently held in the
-//     destination variable.
-//
-// Only the error result can determine if an error occurred.
-func Override[T comparable](dest *T, name string, cnv func(string) (T, error)) (bool, error) {
-	v, err := Parse(name, cnv)
-	switch {
-	case err == nil && *dest != v:
-		*dest = v
-		return true, nil
-	default:
-		return false, err
-	}
-}
 
 // Parse parses the environment variable with the given name and returns a value of
 // type T, obtained by passing the value of the environment variable to a provided
@@ -85,22 +32,24 @@ func Override[T comparable](dest *T, name string, cnv func(string) (T, error)) (
 //	                        // an error if the value cannot be converted
 //
 //	def ...T                // optional default value to use if the environment
-//	                        // variable is not set; the argument is variadic to
-//	                        // allow for no default value.  If multiple default
-//	                        // values are provided, only the first will be used.
+//	                        // variable is not set. Only the first default value
+//	                        // is used. The argument is variadic to allow for no
+//	                        // default value.
 //
 // # returns
 //
 //	T       // the value of the environment variable; if an error occurs the
 //	        // zero value of T is returned
 //
-//	error   // any error resulting from parsing the environment variable;
-//	        // if the error is ErrNotSet a nil error is returned
+//	error   // any [ParseError] resulting from parsing the environment variable;
+//	        // if the variable is not set and no default is provided, the error
+//	        // wraps [ErrNotSet]; if variable is set but cannot be converted,
+//			// the error wraps an [InvalidValueError].
 //
 // # conversion functions
 //
-// The `as` package provides a number of conversion functions that can be used with
-// this function.  For example, to parse an integer environment variable:
+// The `as` package provides a number of conversion functions that can be used.
+// For example, to parse an integer environment variable:
 //
 //	value, err := env.Parse("MY_INT_VAR", as.Int)
 func Parse[T any](name string, cnv ConversionFunc[T], def ...T) (T, error) {
@@ -121,4 +70,40 @@ func Parse[T any](name string, cnv ConversionFunc[T], def ...T) (T, error) {
 	}
 
 	return handleError(ErrNotSet)
+}
+
+// ParseInto is a wrapper around [Parse] that stores the result into a variable
+// identified by a provided target pointer and returns only an error (or nil).
+// If the target is nil a [ParseError] is returned with an underlying
+// [ErrTargetIsNil] error.
+//
+// ParseInto is a convenience function to reduce boilerplate code when parsing
+// multiple environment variables.
+//
+// # parameters
+//
+//	target *T               // pointer to the variable to store the result
+//
+//	name string             // the name of the environment variable to parse
+//
+//	cnv ConversionFunc[T]   // a function to parse the environment variable;
+//	                        // the function should return a value of type T and
+//	                        // an error if the value cannot be converted
+//
+//	def ...T                // optional default value to use if the environment
+//	                        // variable is not set. Only the first default value
+//	                        // is used. The argument is variadic to allow for no
+//	                        // default value.
+func ParseInto[T any](target *T, name string, cnv ConversionFunc[T], def ...T) error {
+	if target == nil {
+		return ParseError{VariableName: name, Err: ErrTargetIsNil}
+	}
+
+	v, err := Parse(name, cnv, def...)
+	if err != nil {
+		return err
+	}
+
+	*target = v
+	return nil
 }

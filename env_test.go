@@ -1,184 +1,164 @@
-package env
+package env_test
 
 import (
 	"errors"
 	"os"
 	"testing"
 
-	"github.com/blugnu/test"
+	. "github.com/blugnu/test"
+
+	"github.com/blugnu/env"
+	"github.com/blugnu/env/internal"
 )
 
 func TestClear(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
-	os.Setenv("VAR", "value")
+	With(t)
 
-	// ACT
-	Clear()
+	// arrange
+	defer env.State().Restore()
+	t.Setenv("VAR", "value")
 
-	// ASSERT
-	_, isSet := os.LookupEnv("VAR")
-	test.IsFalse(t, isSet)
+	// act
+	env.Clear()
+
+	// assert
+	Expect(env.IsSet("VAR")).To(BeFalse())
 }
 
 func TestGet(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
+	With(t)
+
+	// arrange
+	defer env.State().Restore()
 	os.Clearenv()
-	os.Setenv("VAR", "value")
+	t.Setenv("VAR", "value")
 
-	// ACT
-	result := Get("VAR")
+	// act
+	result := env.Get("VAR")
 
-	// ASSERT
-	test.That(t, result, "variable present").Equals("value")
+	// assert
+	Expect(result).To(Equal("value"), "variable present")
 
-	// ACT
-	result = Get("NOTSET")
+	// act
+	result = env.Get("NOTSET")
 
-	// ASSERT
-	test.That(t, result, "variable not present").Equals("")
+	// assert
+	Expect(result).To(Equal(""), "variable not present")
 }
 
-func TestGetVars(t *testing.T) {
-	// ARRANGE
-	testcases := []struct {
-		scenario string
-		exec     func(t *testing.T)
-	}{
-		{scenario: "all variables",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				defer State().Reset()
-				os.Clearenv()
-				os.Setenv("VAR1", "value1")
-				os.Setenv("VAR2", "value2")
+func TestIsSet(t *testing.T) {
+	With(t)
 
-				// ACT
-				result := GetVars()
+	defer env.State().Restore()
+	os.Clearenv()
 
-				// ASSERT
-				test.Map(t, result).Equals(Vars{"VAR1": "value1", "VAR2": "value2"})
-			},
-		},
-		{scenario: "specified variables (including ones not set)",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				defer State().Reset()
-				os.Clearenv()
-				os.Setenv("VAR1", "value1")
-				os.Setenv("VAR2", "value2")
+	t.Setenv("VAR1", "value")
 
-				// ACT
-				result := GetVars("VAR1", "VAR3")
+	set1 := env.IsSet("VAR1")
+	set2 := env.IsSet("VAR2")
 
-				// ASSERT
-				test.Map(t, result).Equals(Vars{"VAR1": "value1"})
-			},
-		},
-	}
-	for _, tc := range testcases {
-		t.Run(tc.scenario, func(t *testing.T) {
-			tc.exec(t)
-		})
-	}
+	Expect(set1).To(BeTrue(), "var 1")
+	Expect(set2).To(BeFalse(), "var 2")
 }
 
 func TestLookup(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
+	With(t)
+
+	// arrange
+	defer env.State().Restore()
 	os.Clearenv()
-	os.Setenv("VAR", "value")
+	t.Setenv("VAR", "value")
+	t.Setenv("EMPTY", "")
 
-	// ACT
-	result, ok := Lookup("VAR")
+	Run(Test("variable that is set", func() {
+		// act
+		result, ok := env.Lookup("VAR")
 
-	// ASSERT
-	test.That(t, result, "variable present").Equals("value")
-	test.IsTrue(t, ok, "variable present")
+		// assert
+		Expect(result).To(Equal("value"), "result")
+		Expect(ok).To(BeTrue(), "ok")
+	}))
 
-	// ACT
-	result, ok = Lookup("NOTSET")
+	Run(Test("variable that is not set", func() {
+		// act
+		result, ok := env.Lookup("NOTSET")
 
-	// ASSERT
-	test.That(t, result, "variable not present").Equals("")
-	test.IsFalse(t, ok, "variable not present")
+		// assert
+		Expect(result).To(Equal(""), "result")
+		Expect(ok).To(BeFalse(), "ok")
+	}))
+
+	Run(Test("variable that is empty", func() {
+		// act
+		result, ok := env.Lookup("EMPTY")
+
+		// assert
+		Expect(result).To(Equal(""), "result")
+		Expect(ok).To(BeTrue(), "ok")
+	}))
 }
 
 func TestSet(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
+	With(t)
+
+	// arrange
+	defer env.State().Restore()
 	os.Clearenv()
 
-	// ACT
-	err := Set("VAR1", "value1")
+	// act
+	err := env.Set("VAR1", "value1")
 
-	// ASSERT
-	test.That(t, err).IsNil()
-	test.That(t, os.Getenv("VAR1")).Equals("value1")
+	// assert
+	Expect(err).Should(BeNil())
+	Expect(os.Getenv("VAR1")).To(Equal("value1"))
 }
 
 func TestUnset(t *testing.T) {
-	// ARRANGE
-	testEnv := map[string]string{
-		"VAR1": "value1",
-		"VAR2": "value2",
-	}
-	testcases := []struct {
-		scenario string
-		exec     func(t *testing.T)
-	}{
-		{scenario: "no names specified",
-			exec: func(t *testing.T) {
-				// ACT
-				err := Unset()
+	With(t)
 
-				// ASSERT
-				test.That(t, err).IsNil()
-				test.That(t, os.Getenv("VAR1")).Equals("value1")
-				test.That(t, os.Getenv("VAR2")).Equals("value2")
-			},
-		},
-		{scenario: "name specified",
-			exec: func(t *testing.T) {
-				// ACT
-				err := Unset("VAR1")
-
-				// ASSERT
-				test.That(t, err).IsNil()
-				_, isSet := os.LookupEnv("VAR1")
-				test.IsFalse(t, isSet)
-				test.That(t, os.Getenv("VAR2")).Equals("value2")
-			},
-		},
-		{
-			scenario: "error when unsetting",
-			exec: func(t *testing.T) {
-				// ARRANGE
-				unseterr := errors.New("unset error")
-				defer test.Using(&osUnsetenv, func(string) error { return unseterr })()
-
-				// ACT
-				err := Unset("VAR1", "VAR2")
-
-				// ASSERT
-				test.Error(t, err).Is(unseterr)
-				test.That(t, os.Getenv("VAR1")).Equals("value1")
-				test.That(t, os.Getenv("VAR2")).Equals("value2")
-			},
-		},
-	}
-	for _, tc := range testcases {
-		t.Run(tc.scenario, func(t *testing.T) {
-			// ARRANGE
-			defer State().Reset()
+	Run(Testcases(
+		ForEach(func(testcase func()) {
+			defer env.State().Restore()
 			os.Clearenv()
-			for k, v := range testEnv {
-				os.Setenv(k, v)
-			}
 
-			// ACT & ASSERT
-			tc.exec(t)
-		})
-	}
+			T().Setenv("VAR1", "value1")
+			T().Setenv("VAR2", "value2")
+
+			testcase()
+		}),
+
+		Case("no names specified", func() {
+			// act
+			err := env.Unset()
+
+			// assert
+			Expect(err).IsNil()
+			Expect(os.Getenv("VAR1")).To(Equal("value1"))
+			Expect(os.Getenv("VAR2")).To(Equal("value2"))
+		}),
+
+		Case("names specified", func() {
+			// act
+			err := env.Unset("VAR1")
+
+			// assert
+			Expect(err).IsNil()
+			Expect(os.Getenv("VAR1")).To(Equal(""))
+			Expect(os.Getenv("VAR2")).To(Equal("value2"))
+		}),
+
+		Case("error when unsetting", func() {
+			// arrange
+			unsetErr := errors.New("unset error")
+			defer Restore(Original(&internal.Unsetenv).ReplacedBy(func(string) error { return unsetErr }))
+
+			// act
+			err := env.Unset("VAR1", "VAR2")
+
+			// assert
+			Expect(err).Is(unsetErr)
+			Expect(os.Getenv("VAR1")).To(Equal("value1"))
+			Expect(os.Getenv("VAR2")).To(Equal("value2"))
+		}),
+	))
 }

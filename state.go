@@ -39,7 +39,7 @@ func State() state {
 	return os.Environ()
 }
 
-// Reset resets the environment variables to the state captured when
+// Restore resets the environment variables to the state captured when
 // the State function was called.
 //
 // This function is typically used in a defer statement to ensure the
@@ -49,7 +49,7 @@ func State() state {
 //
 //	func TestSomething(t *testing.T) {
 //		// ARRANGE
-//		defer env.State().Reset()
+//		defer env.State().Restore()
 //		env.Vars{
 //			"VAR1", "value1",
 //			"VAR2", "value2",
@@ -58,10 +58,10 @@ func State() state {
 //		// ACT
 //		// ...
 //	}
-func (s state) Reset() {
+func (s state) Restore() {
 	os.Clearenv()
 	for _, e := range s {
 		k, v, _ := strings.Cut(e, "=")
-		os.Setenv(k, v)
+		_ = os.Setenv(k, v)
 	}
 }

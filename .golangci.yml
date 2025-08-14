@@ -10,6 +10,7 @@ linters:
     - godot                      # not all comments need end with a period
     - inamedparam                # subjective; parameter names are not significant in interfaces though may be helpful
     - interfacebloat             # subjective
+    - intrange                   # subjective; an explicit loop may more clearly express intent in some cases
     - lll                        # long lines (> col 120) are (occasionally) acceptable/required
     - nlreturn                   # subjective
     - noinlineerr                # subjective; inline error checks sometimes help readability
@@ -18,14 +19,12 @@ linters:
     - wsl                        # unreasonably opinionated and buggy
     - wsl_v5                     # unreasonably opinionated and buggy
 
-    # not supported when go.mod Go version is <1.22
-    - copyloopvar
-    - intrange
 
     # exceptions specific to the needs of this project
+    - dupl                # false negatives
     - forbidigo           # Println is used to test stdout
     - ireturn             # returning any is required when dealing with types of unknown value
-    - thelper                    # makes scenario exec(testing.T) test cases impossible
+    - thelper             # makes scenario exec(testing.T) test cases impossible
 
   settings:
     depguard:
@@ -48,4 +47,5 @@ linters:
 
     staticcheck:
       checks:
+        - all
         - -QF1008    # "could remove embedded field <name> from selector"; sometimes it is useful (if unnecessary) to disambiguate
