@@ -2,7 +2,7 @@
   <img src=".assets/banner.png" alt="env" />
   <!-- <hr> -->
   <div align="center">
-  <h3>streamline and simplify the way you work with environment variables</h3>
+  <h3>simplify and protect the way you work with environment variables</h3>
   </div>
   <hr>
   <div align="center">
@@ -13,7 +13,7 @@
       <img alt="go report" src="https://goreportcard.com/badge/github.com/blugnu/env"/>
     </a>
     <a>
-      <img alt="go version >= 1.14" src="https://img.shields.io/github/go-mod/go-version/blugnu/env?style=flat-square"/>
+      <img alt="go version >= 1.23" src="https://img.shields.io/github/go-mod/go-version/blugnu/env?style=flat-square"/>
     </a>
     <a href="https://github.com/blugnu/env/blob/master/LICENSE">
       <img alt="MIT License" src="https://img.shields.io/github/license/blugnu/env?color=%234275f5&style=flat-square"/>
@@ -29,12 +29,12 @@
 
 ## Features
 
-- [ ] **.env File Support**: Load variables from a `.env` file and/or specified file(s)
-- [ ] **Type Conversions**: Safely convert environment variable strings to Go types
-- [ ] **Validation**: Use validated conversions to check common configuration
-                      errors (e.g. `as.PortNo` to enforce 0 <= X <= 65535)
-- [ ] **Extensible**: Implement your own type conversions
-- [ ] **Testing**: Convenient testing utilities
+- _**`.env` File Support**_: Load variables from a `.env` file and/or other specified file(s)
+- _**Type-Safe Conversions**_: Safely convert environment variable strings to Go types
+- _**Validation**_: Use validated conversions to check common configuration errors
+                    (_e.g. `as.PortNo` enforces `0 <= x <= 65535`_)
+- _**Extensible**_: Implement your own type conversions
+- _**Testing**_: Convenient testing utilities
 
 ## Installation
 
@@ -52,17 +52,18 @@ Demonstrates the use of the `env.Parse` function to parse an optional
 value from an environment variable, with a default value:
 
 ```go
-    port := 8080
-    port, err := env.Parse("SERVICE_PORT", as.PortNo, port); err != nil {
+    port, err := env.Parse("SERVICE_PORT", as.PortNo, 8080)
+    if err != nil {
         log.Fatal(err)
     }
+    
     log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 ```
 
 If the environment variable is set the variable is updated with the parsed value.
 
-If the environment variable is not set, the default value is returned.  In this case
-the default value is the variable's original value so the variable is unchanged.
+If the environment variable is not set, the default value is returned (`8080` in this
+example).
 
 If the environment variable fails to parse, an error is returned.
 
@@ -107,7 +108,9 @@ multiple variables, e.g.:
     errs = append(errs, env.ParseInto(&cfg.Port, "SERVICE_PORT", as.PortNo, 8080))
     errs = append(errs, env.ParseInto(&cfg.Url, "AUTH_SERVICE_URL", as.AbsoluteURL))
 
-    return errors.Join(errs...)
+    if err := errors.Join(errs...); err != nil {
+        log.Fatal(err)
+    }
 ```
 
 ### Get a Map of Environment Variables
@@ -124,11 +127,12 @@ variables:
 
 Although `testing.T` provides methods for setting environment variables for the
 duration of the current test, this leaves other variables in the environment
-unchanged.
+unchanged, which may be undesirable.
 
-To provide a test with a clean, known environment, use the `env.State` function
-to obtain the current state of the environment, and `Restore` it at the end of
-the test. This allows the environment to be cleared and set for the test using
+The `env.State` function captures the current state of the environment in a variable
+with a `Restore` method which restores the environment to that captured state.
+
+This allows the environment to be cleared and set for the test using
 regular `os` functions as required, without affecting other tests:
 
 ```go
