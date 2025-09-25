@@ -1,3 +1,6 @@
+// Package internal provides internal utilities for the `env/as` package.
+//
+// SPDX-License-Identifier: MIT
 package internal
 
 import "net/url"
