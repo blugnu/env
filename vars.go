@@ -1,54 +1,60 @@
 package env
 
 import (
-	"fmt"
-	"slices"
+	"os"
 	"strings"
+
+	"github.com/blugnu/env/internal"
 )
 
-// Vars is a map of environment variables.
-type Vars map[string]string
-
-// Names returns the names of all variables in the map as a sorted slice.
-func (v Vars) Names() []string {
-	names := make([]string, 0, len(v))
-	for k := range v {
-		names = append(names, k)
-	}
-	slices.Sort(names)
-	return names
-}
-
-// Set applies the variables to the environment.  If an error occurs while setting
-// a variable, the error is returned without any further variables being set.
+// Vars returns a map containing environment variables.
+//
+// If no variable names are provided, the map is initialized with all
+// variables in the current environment.
+//
+// Otherwise, the returned map contains entries only for those variables
+// that are specified and which are set.
+//
+// # parameters
+//
+//	names ...string   // (optional) names of environment variables to return;
+//	                  // if no names are provided the returned map contains all
+//	                  // current environment variables.
 //
 // # returns
 //
-//	error   // any error that occurs while setting the variables
-func (v Vars) Set() error {
-	for k, v := range v {
-		if err := osSetenv(k, v); err != nil {
-			return fmt.Errorf("failed to set environment variable %s: %w", k, err)
+//	map[string]string   // a map of environment variables where the key is the
+//	                    // name of the environment variable; keys are trimmed of
+//	                    // leading and trailing whitespace; values are not trimmed
+func Vars(names ...string) map[string]string {
+	var (
+		src []string
+		fn  func(string) (string, string, bool)
+	)
+
+	switch len(names) {
+	case 0: // all environment variables
+		src = os.Environ()
+		fn = func(s string) (string, string, bool) {
+			k, v, _ := strings.Cut(s, "=")
+			return strings.TrimSpace(k), v, true
+		}
+
+	default: // only the named variables (if set)
+		src = names
+		fn = func(s string) (string, string, bool) {
+			k := strings.TrimSpace(s)
+			v, isSet := internal.LookupEnv(k)
+			return k, v, isSet
 		}
 	}
-	return nil
-}
 
-// String returns a string representation of the variables. The result is a string of
-// comma delimited NAME="VALUE" entries, sorted by NAME and enclosed in [-]'s.
-//
-// # result
-//
-//	string   // a string representation of the variables in the form:
-//
-//		[NAME1="VALUE1",NAME2="VALUE2",NAME3="VALUE3"]
-//
-// If the map is empty the result is "[]".
-func (v Vars) String() string {
-	n := v.Names()
-	ls := make([]string, 0, len(n))
-	for _, k := range n {
-		ls = append(ls, k+`="`+v[k]+`"`)
+	result := make(map[string]string, len(src))
+	for _, s := range src {
+		if k, v, isSet := fn(s); isSet {
+			result[k] = v
+		}
 	}
-	return "[" + strings.Join(ls, ",") + "]"
+
+	return result
 }

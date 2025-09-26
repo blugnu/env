@@ -1,100 +1,159 @@
-package env
+package env_test
 
 import (
 	"errors"
-	"os"
 	"strconv"
 	"testing"
 
-	"github.com/blugnu/test"
+	. "github.com/blugnu/test"
+
+	"github.com/blugnu/env"
+	"github.com/blugnu/env/internal"
 )
 
 func TestParse(t *testing.T) {
-	// ARRANGE
-	defer test.Using(&osLookupEnv, func(string) (string, bool) {
+	With(t)
+
+	// arrange
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
 		return "123", true
-	})()
+	}))
 
-	// ACT
-	value, err := Parse("VAR", strconv.Atoi)
+	// act
+	value, err := env.Parse("VAR", strconv.Atoi)
 
-	// ASSERT
-	test.That(t, value).Equals(123)
-	test.That(t, err).IsNil()
+	// assert
+	Expect(err).IsNil()
+	Expect(value).To(Equal(123))
 }
 
 func TestParse_WhenVariableNotSet(t *testing.T) {
-	// ARRANGE
-	defer test.Using(&osLookupEnv, func(string) (string, bool) {
+	With(t)
+
+	// arrange
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
 		return "", false
-	})()
+	}))
 
-	// ACT
-	value, err := Parse("NOT_SET", func(s string) (string, error) { return s, nil })
+	// act
+	value, err := env.Parse("NOT_SET", func(s string) (string, error) { return s, nil })
 
-	// ASSERT
-	test.That(t, value).Equals("")
-	test.Error(t, err).Is(ErrNotSet)
+	// assert
+	Expect(err).Is(env.ErrNotSet)
+	Expect(err).Is(env.ParseError{VariableName: "NOT_SET"})
+	Expect(value).To(Equal(""))
 }
 
 func TestParse_WhenConversionFails(t *testing.T) {
-	// ARRANGE
+	With(t)
+
+	// arrange
 	converr := errors.New("conversion error")
-	defer test.Using(&osLookupEnv, func(string) (string, bool) {
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
 		return "not-a-number", true
-	})()
+	}))
 
-	// ACT
-	value, err := Parse("NOT_A_NUMBER", func(s string) (int, error) { return 0, converr })
+	// act
+	value, err := env.Parse("NOT_A_NUMBER", func(s string) (int, error) { return 0, converr })
 
-	// ASSERT
-	test.That(t, value).Equals(0)
-	test.Error(t, err).Is(InvalidValueError{Value: "not-a-number", Err: converr})
+	// assert
+	Expect(err).Is(converr)
+	Expect(err).Is(env.ParseError{VariableName: "NOT_A_NUMBER"})
+	Expect(err).Is(env.InvalidValueError{Value: "not-a-number"})
+	Expect(value).To(Equal(0))
 }
 
-func TestOverride(t *testing.T) {
-	// ARRANGE
+func TestParse_WithDefaultWhenNotSet(t *testing.T) {
+	With(t)
+
+	// arrange
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
+		return "", false
+	}))
+
+	// act
+	value, err := env.Parse("VAR", strconv.Atoi, 42)
+
+	// assert
+	Expect(err).IsNil()
+	Expect(value).To(Equal(42))
+}
+
+func TestParse_WithDefaultWhenSet(t *testing.T) {
+	With(t)
+
+	// arrange
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
+		return "123", true
+	}))
+
+	// act
+	value, err := env.Parse("VAR", strconv.Atoi, 42)
+
+	// assert
+	Expect(err).IsNil()
+	Expect(value).To(Equal(123))
+}
+
+func TestParse_WithDefaultWhenError(t *testing.T) {
+	With(t)
+
+	// arrange
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
+		return "abc", true
+	}))
+
+	// act
+	value, err := env.Parse("VAR", strconv.Atoi, 42)
+
+	// assert
+	Expect(err).Is(strconv.ErrSyntax)
+	Expect(err).Is(env.ParseError{VariableName: "VAR"})
+	Expect(err).Is(env.InvalidValueError{Value: "abc"})
+	Expect(value).To(Equal(0))
+}
+
+func TestParseInto(t *testing.T) {
+	With(t)
+
+	// arrange
+	var value int
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
+		return "123", true
+	}))
+
+	// act
+	err := env.ParseInto(&value, "VAR", strconv.Atoi)
+
+	// assert
+	Expect(err).IsNil()
+	Expect(value).To(Equal(123))
+}
+
+func TestParseInto_WhenErrorOccurs(t *testing.T) {
+	With(t)
+
+	// arrange
 	var value = 42
-	defer State().Reset()
-	os.Clearenv()
-	os.Setenv("VAR", "123")
+	defer Restore(Original(&internal.LookupEnv).ReplacedBy(func(string) (string, bool) {
+		return "not a number", true
+	}))
 
-	// ACT
-	result, err := Override(&value, "VAR", strconv.Atoi)
+	// act
+	err := env.ParseInto(&value, "VAR", strconv.Atoi)
 
-	// ASSERT
-	test.That(t, err).IsNil()
-	test.IsTrue(t, result)
-	test.That(t, value).Equals(123)
+	// assert
+	Expect(err).Is(env.ParseError{VariableName: "VAR"})
+	Expect(err).Is(env.InvalidValueError{Value: "not a number", Err: strconv.ErrSyntax})
+	Expect(value).To(Equal(42))
 }
 
-func TestOverride_WhenValueIsNotChanged(t *testing.T) {
-	// ARRANGE
-	var value = 123
-	defer State().Reset()
-	os.Clearenv()
-	os.Setenv("VAR", "123")
+func TestParseInto_WhenTargetIsNil(t *testing.T) {
+	With(t)
 
-	// ACT
-	result, err := Override(&value, "VAR", strconv.Atoi)
+	// act
+	err := env.ParseInto(nil, "VAR", strconv.Atoi)
 
-	// ASSERT
-	test.That(t, err).IsNil()
-	test.IsFalse(t, result)
-	test.That(t, value).Equals(123)
-}
-
-func TestOverride_WhenVariableIsNotSet(t *testing.T) {
-	// ARRANGE
-	var value = 42
-	defer State().Reset()
-	os.Clearenv()
-
-	// ACT
-	result, err := Override(&value, "VAR", strconv.Atoi)
-
-	// ASSERT
-	test.Error(t, err).Is(ErrNotSet)
-	test.IsFalse(t, result)
-	test.That(t, value).Equals(42)
+	// assert
+	Expect(err).Is(env.ParseError{VariableName: "VAR", Err: env.ErrTargetIsNil})
 }

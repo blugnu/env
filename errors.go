@@ -6,9 +6,79 @@ import (
 )
 
 var (
-	ErrNotSet            = errors.New("not set")
-	ErrSetVariableFailed = errors.New("set variable failed")
+	// ErrInvalidEntry is returned from [Load], [LoadFile], or [LoadFromReader] when
+	// a line is encountered in a specified file or [io.Reader] that is not valid.
+	ErrInvalidEntry = errors.New("invalid entry")
+
+	// ErrNotSet is returned from [Parse] when a variable is not set
+	// and no default value is specified.
+	ErrNotSet = errors.New("variable not set")
+
+	// ErrSetFailed is returned from [Load], [LoadFile], or [LoadFromReader] when
+	// setting an environment variable fails.
+	ErrSetFailed = errors.New("failed to set environment variable")
+
+	// ErrTargetIsNil is returned from [ParseInto] when the target pointer is nil.
+	ErrTargetIsNil = errors.New("target is nil")
 )
+
+// FileError is an error that wraps an error occurring while
+// accessing a file.  It includes the name of the file being
+// accessed at the time of the error.
+type FileError struct {
+	Filename string
+	err      error
+}
+
+// NewFileError creates a new [FileError] instance associating
+// the specified filename with the provided error.
+func NewFileError(filename string, err error) FileError {
+	return FileError{
+		Filename: filename,
+		err:      err,
+	}
+}
+
+// Error implements the error interface.
+func (err FileError) Error() string {
+	switch {
+	case err.err != nil && err.Filename != "":
+		return fmt.Sprintf("env.FileError: %s: %v", err.Filename, err.err)
+	case err.err != nil:
+		return fmt.Sprintf("env.FileError: %v", err.err)
+	case err.Filename != "":
+		return "env.FileError: " + err.Filename
+	default:
+		return "env.FileError"
+	}
+}
+
+// Is reports whether the target error is a match for the receiver.
+// The target is considered a match if:
+//
+//   - it has the same filename (or no filename); and
+//   - the same error (or no error)
+func (err FileError) Is(target error) bool {
+	isMatch := func(target *FileError) bool {
+		return (target != nil) &&
+			(target.Filename == "" || target.Filename == err.Filename) &&
+			(target.err == nil || errors.Is(err.err, target.err))
+	}
+
+	switch t := target.(type) {
+	case *FileError:
+		return isMatch(t)
+	case FileError:
+		return isMatch(&t)
+	}
+
+	return false
+}
+
+// Unwrap returns the error that caused the FileError.
+func (err FileError) Unwrap() error {
+	return err.err
+}
 
 // ParseError is an error that wraps an error occurring while
 // parsing an environment variable.  It includes the name of the
@@ -53,11 +123,20 @@ func (e ParseError) Error() string {
 //   - the target Err field must satisfy errors.Is with respect to the
 //     receiver Err, or be nil
 func (e ParseError) Is(target error) bool {
-	if target, ok := target.(ParseError); ok {
-		return (target.VariableName == "" || e.VariableName == target.VariableName) &&
+	isMatch := func(target *ParseError) bool {
+		return (target != nil) &&
+			(target.VariableName == "" || e.VariableName == target.VariableName) &&
 			(target.Err == nil || errors.Is(e.Err, target.Err))
 	}
-	return false
+
+	switch t := target.(type) {
+	case *ParseError:
+		return isMatch(t)
+	case ParseError:
+		return isMatch(&t)
+	default:
+		return false
+	}
 }
 
 // Unwrap returns the error that caused the env.Parse.
@@ -107,11 +186,20 @@ func (e InvalidValueError) Error() string {
 //   - the target Err field must satisfy errors.Is with respect to the receiver Err,
 //     or be nil
 func (e InvalidValueError) Is(target error) bool {
-	if target, ok := target.(InvalidValueError); ok {
-		return (target.Value == "" || e.Value == target.Value) &&
+	isMatch := func(target *InvalidValueError) bool {
+		return (target != nil) &&
+			(target.Value == "" || e.Value == target.Value) &&
 			(target.Err == nil || errors.Is(e.Err, target.Err))
 	}
-	return false
+
+	switch t := target.(type) {
+	case *InvalidValueError:
+		return isMatch(t)
+	case InvalidValueError:
+		return isMatch(&t)
+	default:
+		return false
+	}
 }
 
 // Unwrap returns the error that caused the invalid value error.
@@ -150,8 +238,21 @@ func (e RangeError[T]) Error() string {
 //   - the target Min and Max fields must match the receiver's Min and Max fields,
 //     or be the zero value of T
 func (e RangeError[T]) Is(target error) bool {
-	if target, ok := target.(RangeError[T]); ok {
-		return e == target || (target == RangeError[T]{})
+	isMatch := func(target *RangeError[T]) bool {
+		var (
+			zero T
+		)
+		return (target != nil) &&
+			((target.Min == zero) || (target.Min == e.Min)) &&
+			((target.Max == zero) || (target.Max == e.Max))
 	}
-	return false
+
+	switch t := target.(type) {
+	case *RangeError[T]:
+		return isMatch(t)
+	case RangeError[T]:
+		return isMatch(&t)
+	default:
+		return false
+	}
 }

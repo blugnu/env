@@ -1,48 +1,50 @@
 package as
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// Duration parses a string into a time.Duration. If a unit is provided, the string is first
-// converted to an integer and then multiplied by the unit.
-//
-// Attempting to convert a duration string using a specified unit will fail due to the
-// duration string contain non-numeric characters.
-//
-// # parameters
-//
-//	s string             // the string to convert
-//
-//	u ...time.Duration   // the unit to multiply the duration by; if no unit is provided
-//	                     // the string is parsed as a duration.  If multiple units are
-//	                     // provided, only the first is used
-//
-// # returns
-//
-//	time.Duration   // the converted value
-//
-//	error           // any error that occurs during conversion
-//
-// # example: parse a duration string
-//
-//	d, err := as.Duration("1h30m")
-//
-// # example: parse a duration string with a unit
-//
-//	d, err := as.Duration("1", time.Hour)
-//
-// # example: parse a duration string with a unit
-//
-//	// this will fail, returning an integer conversion error
-//	d, err := as.Duration("1h", time.Hour)
-func Duration(s string, u ...time.Duration) (time.Duration, error) {
-	if len(u) == 0 {
-		return time.ParseDuration(s)
-	}
-	i, err := Int(s)
+// Duration parses a string into a time.Duration. The string must contain
+// a valid duration expression (e.g., "1h30m"). If the string does not
+// contain a valid duration expression, an error is returned with a zero
+// duration.
+func Duration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	dur, err := time.ParseDuration(s)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("as.Duration: %w: %w", ErrNotADuration, err)
 	}
-	return time.Duration(i) * u[0], nil
+	return dur, nil
+}
+
+// DurationIn returns a function that parses a string into a [time.Duration] applying
+// specified [time.Duration] units.
+//
+// If the string fails to parse as a plain integer value, an attempt is made to parse
+// it as a duration expression. If this is successful, the parsed duration is returned
+// and the specified units are ignored.
+//
+// If the string does not hold either a simple integer or a valid duration expression,
+// an error is returned with a zero duration.
+func DurationIn(units time.Duration) func(string) (time.Duration, error) {
+	return func(s string) (time.Duration, error) {
+		s = strings.TrimSpace(s)
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			// attempting to parse as a duration expression is a fallback,
+			// but if that fails then the issue is that the value is not
+			// an integer, so any duration parsing error is discarded in
+			// favor of the original integer parsing error
+			if dur, err := time.ParseDuration(s); err == nil {
+				return dur, nil
+			}
+
+			return 0, fmt.Errorf("as.DurationIn(%s): %w: %w", units, notAnIntegerOrDurationError{}, err)
+		}
+
+		return time.Duration(i) * units, nil
+	}
 }

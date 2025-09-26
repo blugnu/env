@@ -1,74 +1,67 @@
-package env
+package env_test
 
 import (
-	"errors"
 	"os"
 	"testing"
 
-	"github.com/blugnu/test"
+	. "github.com/blugnu/test"
+
+	"github.com/blugnu/env"
 )
 
-func TestVars_Names(t *testing.T) {
-	// ACT
-	result := Vars{
-		"VAR3": "value2",
-		"VAR1": "value1",
-		"VAR2": "value2",
-	}.Names()
+func TestVars(t *testing.T) {
+	With(t)
 
-	// ASSERT
-	test.That(t, result).Equals([]string{"VAR1", "VAR2", "VAR3"})
-}
+	Run(Testcases(
+		ForEach(func(testcase func()) {
+			defer env.State().Restore()
+			os.Clearenv()
 
-func TestVars_Set(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
-	os.Clearenv()
+			T().Setenv("VAR1", "value1")
+			T().Setenv("VAR2", " value2 ")
 
-	// ACT
-	err := Vars{
-		"VAR1": "value1",
-		"VAR2": "value2",
-	}.Set()
+			testcase()
+		}),
 
-	// ASSERT
-	test.That(t, err).IsNil()
-	test.That(t, os.Getenv("VAR1")).Equals("value1")
-	test.That(t, os.Getenv("VAR2")).Equals("value2")
-}
+		Case("loads all variables when none are specified", func() {
+			// act
+			result := env.Vars()
 
-func TestVars_Set_WhenSetenvFails(t *testing.T) {
-	// ARRANGE
-	defer State().Reset()
+			// assert
+			Expect(result).To(EqualMap(map[string]string{
+				"VAR1": "value1",
+				"VAR2": " value2 ",
+			}))
+		}),
 
-	seterr := errors.New("setenv error")
-	defer test.Using(&osSetenv, func(string, string) error {
-		return seterr
-	})()
+		Case("specified variables (including ones not set)", func() {
+			// act
+			result := env.Vars("VAR1", "VAR3")
 
-	// ACT
-	err := Vars{"VAR1": "value1"}.Set()
+			// assert
+			Expect(result).To(EqualMap(map[string]string{
+				"VAR1": "value1",
+			}))
+		}),
 
-	// ASSERT
-	test.Error(t, err).Is(seterr)
-}
+		Case("trims whitespace from names", func() {
+			// act
+			result := env.Vars(" VAR1\t")
 
-func TestVars_String(t *testing.T) {
-	// ACT
-	result := Vars{
-		"VAR3": "value3",
-		"VAR1": "value1",
-		"VAR2": "value2",
-	}.String()
+			// assert
+			Expect(result).To(EqualMap(map[string]string{
+				"VAR1": "value1",
+			}))
+		}),
 
-	// ASSERT
-	test.That(t, result).Equals(`[VAR1="value1",VAR2="value2",VAR3="value3"]`)
-}
+		Case("does not trim whitespace from values", func() {
+			// act
+			result := env.Vars("VAR2")
 
-func TestVars_String_WhenEmpty(t *testing.T) {
-	// ACT
-	result := Vars{}.String()
-
-	// ASSERT
-	test.That(t, result).Equals("[]")
+			// assert
+			Expect(result).To(EqualMap(map[string]string{
+				"VAR2": " value2 ",
+			}))
+		}),
+	))
 }

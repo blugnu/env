@@ -4,6 +4,7 @@ import (
 	"net/url"
 
 	"github.com/blugnu/env"
+	"github.com/blugnu/env/as/internal"
 )
 
 // AbsoluteURL converts a string to an absolute URI. An absolute URI is a URI
@@ -28,9 +29,9 @@ import (
 //   - if the URL is not an absolute URI, the function returns an
 //     env.InvalidValueError
 func AbsoluteURL(s string) (*url.URL, error) {
-	u, err := urlParse(s)
+	u, err := internal.ParseURL(s)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // returns the parse error from [url.Parse]
 	}
 	if !u.IsAbs() {
 		return nil, env.InvalidValueError{Value: s, Err: ErrNotAnAbsoluteURL}
